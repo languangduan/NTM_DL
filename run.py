@@ -3,11 +3,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score, r2_score
 from tqdm import tqdm
 
-from group_Proj.datasets.TwentyNewsDataset import NewsGroupDataset
-from datasets.rt_polaritydata.MovieReviewDatasetNew import PolarityDataset
+from datasets.TwentyNewsDataset import NewsGroupDataset
+from datasets.MovieReviewDataset import PolarityDataset
 from models.NTM import SupervisedNeuralTopicModel, NeuralTopicModel
 from utils.utils import setup_nltk_data, parse_args, setup_logger
 
@@ -15,7 +15,7 @@ from utils.utils import setup_nltk_data, parse_args, setup_logger
 def train_model(model, train_dataset, val_dataset=None,
                 num_epochs=10, batch_size=32, learning_rate=0.01,
                 margin=0.5, pretrain=True, supervised=True,
-                label_weight=0.5):
+                label_weight=0.5, regression_mode=False):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
@@ -87,8 +87,12 @@ def train_model(model, train_dataset, val_dataset=None,
 
                 # 计算总损失
                 if supervised:
-                    label_loss = F.cross_entropy(label_probs, target)
-                    loss = (1 - label_weight) * ranking_loss + label_weight * label_loss
+                    if not regression_mode:
+                        label_loss = F.cross_entropy(label_probs, target)
+                        loss = (1 - label_weight) * ranking_loss + label_weight * label_loss
+                    else:
+                        label_loss = F.mse_loss(label_probs, target.float())
+                        loss = (1 - label_weight) * ranking_loss + label_weight * label_loss
                 else:
                     loss = ranking_loss
 
@@ -102,7 +106,7 @@ def train_model(model, train_dataset, val_dataset=None,
 
             # 验证
             if val_dataset:
-                validate(model, val_dataloader, supervised, device)
+                validate(model, val_dataloader, supervised, device, regression_mode)
 
     # 执行训练流程
     if pretrain:
@@ -110,15 +114,13 @@ def train_model(model, train_dataset, val_dataset=None,
     train_step()
 
 
-from sklearn.metrics import f1_score
-
-
-def validate(model, val_dataloader, supervised, device):
+def validate(model, val_dataloader, supervised, device, regression_mode=False):
     """验证函数，返回损失和各项指标"""
     model.eval()
     total_loss = 0
     all_predictions = []
     all_labels = []
+    all_scores = []  # 用于存储回归模式的原始预测分数
 
     with torch.no_grad():
         for batch in val_dataloader:
@@ -126,13 +128,19 @@ def validate(model, val_dataloader, supervised, device):
 
             if supervised and len(batch) > 3:
                 labels = batch[3].to(device)
-                scores, label_probs = model(pos_ngram, pos_doc)
+                if regression_mode:
+                    scores = model(pos_ngram, pos_doc)[0]
+                    loss = F.mse_loss(scores.squeeze(), labels.float())
 
-                # 计算损失
-                loss = F.cross_entropy(label_probs, labels)
+                    # 存储原始预测分数
+                    all_scores.extend(scores.squeeze().cpu().numpy())
 
-                # 获取预测结果
-                predicted = torch.argmax(label_probs, dim=1)
+                    # 使用0.5作为阈值进行二分类
+                    predicted = (scores.squeeze() > 0.5).float()
+                else:
+                    scores, label_probs = model(pos_ngram, pos_doc)
+                    loss = F.cross_entropy(label_probs, labels)
+                    predicted = torch.argmax(label_probs, dim=1)
 
                 # 收集预测和真实标签
                 all_predictions.extend(predicted.cpu().numpy())
@@ -167,8 +175,7 @@ def validate(model, val_dataloader, supervised, device):
 
         # 计算R²分数（如果需要的话）
         r2 = None
-        if hasattr(model, 'regression_output'):
-            from sklearn.metrics import r2_score
+        if regression_mode:
             r2 = r2_score(all_labels, all_predictions)
 
         # 输出所有指标
@@ -227,7 +234,6 @@ if __name__ == '__main__':
     logger.info(f"Number of Epochs: {args.num_epochs}")
     logger.info("===========================")
 
-
     # 设置随机种子
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
@@ -240,7 +246,7 @@ if __name__ == '__main__':
     setup_nltk_data(required_resources)
 
     dataset = None
-    dataset_val =None
+    dataset_val = None
     if args.supervised:
         mode = 'supervised'
     else:
@@ -253,7 +259,10 @@ if __name__ == '__main__':
     elif args.dataset == 'movie':  # movie reviews
         dataset = PolarityDataset(data_dir=args.data_dir, split='train', mode=mode)
         dataset_val = PolarityDataset(data_dir=args.data_dir, split='test', mode=mode)
-        num_labels = 2
+        if args.regression:
+            num_labels = 1
+        else:
+            num_labels = 2
 
     train_dataset, val_dataset = train_test_split(
         dataset,
@@ -270,7 +279,8 @@ if __name__ == '__main__':
         model = SupervisedNeuralTopicModel(
             embedding_dim=args.embedding_dim,
             topic_dim=args.topic_dim,
-            num_labels=num_labels
+            num_labels=num_labels,
+            regression_mode=args.regression
         )
     else:
         model = NeuralTopicModel(
@@ -279,7 +289,7 @@ if __name__ == '__main__':
         )
 
     # 训练和测试
-    train_model(model, dataset, val_dataset=dataset_val, supervised=args.supervised)
+    train_model(model, dataset, val_dataset=dataset_val, supervised=args.supervised, regression_mode=args.regression)
     # train_model(train_loader, model, device, args)
 
     if args.supervised:

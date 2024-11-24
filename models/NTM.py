@@ -20,20 +20,36 @@ class NeuralTopicModel(nn.Module):
         score = torch.sum(ngram_topic * document_topic, dim=-1)
         return score
 
+
 class SupervisedNeuralTopicModel(nn.Module):
-    def __init__(self, embedding_dim=300, topic_dim=100, num_labels=10):
+    def __init__(self, embedding_dim=300, topic_dim=100, num_labels=10, regression_mode=False):
         super(SupervisedNeuralTopicModel, self).__init__()
+        self.regression_mode = regression_mode
         self.ngram_to_topic = nn.Linear(embedding_dim, topic_dim)
         self.document_to_topic = nn.Linear(embedding_dim, topic_dim)
-        self.topic_to_label = nn.Linear(topic_dim, num_labels)
+
+        if regression_mode:
+            self.topic_to_output = nn.Linear(topic_dim, 1)
+        else:
+            self.topic_to_label = nn.Linear(topic_dim, num_labels)
 
     def forward(self, ngram_embedding, document_embedding):
+        # 主题表示
         ngram_topic = torch.sigmoid(self.ngram_to_topic(ngram_embedding))
         document_topic = F.softmax(self.document_to_topic(document_embedding), dim=-1)
-        score = torch.sum(ngram_topic * document_topic, dim=-1)
-        label_logits = self.topic_to_label(document_topic)
-        label_probs = F.softmax(label_logits, dim=-1)
-        return score, label_probs
+
+        # 计算相似度得分 - 移除keepdim=True
+        score = torch.sum(ngram_topic * document_topic, dim=-1)  # 现在输出维度是 [batch_size]
+
+        if self.regression_mode:
+            # 回归模式
+            regression_output = torch.sigmoid(self.topic_to_output(document_topic)).squeeze(-1)  # 确保输出是 [batch_size]
+            return score, regression_output
+        else:
+            # 分类模式
+            label_logits = self.topic_to_label(document_topic)
+            label_probs = F.softmax(label_logits, dim=-1)
+            return score, label_probs
 
 
 class UnifiedNeuralTopicModel(nn.Module):

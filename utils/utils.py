@@ -37,7 +37,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Neural Topic Model Training')
 
     # 数据集相关参数
-    parser.add_argument('--dataset', type=str, choices=['20news', 'movie'], default='20news',
+    parser.add_argument('--dataset', type=str, choices=['20news', 'movie'], default='movie',
                         help='Dataset to use (20news or movie)')
     parser.add_argument('--categories', nargs='+', default=None,
                         help='Categories for 20 NewsGroups dataset (optional)')
@@ -45,8 +45,10 @@ def parse_args():
                         help='Type of n-gram to use')
 
     # 模型相关参数
-    parser.add_argument('--supervised', type=bool, default=False,
+    parser.add_argument('--supervised', type=bool, default=True,
                         help='Whether to use supervised learning')
+    parser.add_argument('--regression', type=bool, default=True,
+                        help='Whether to do regression')
     parser.add_argument('--embedding_dim', type=int, default=300,
                         help='Dimension of word embeddings')
     parser.add_argument('--topic_dim', type=int, default=100,
