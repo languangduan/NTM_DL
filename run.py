@@ -292,5 +292,5 @@ if __name__ == '__main__':
     train_model(model, dataset, val_dataset=dataset_val, supervised=args.supervised, regression_mode=args.regression)
     # train_model(train_loader, model, device, args)
 
-    if args.supervised:
-        test_model(test_loader, model, device)
+    # if args.supervised:
+    #     test_model(test_loader, model, device)
