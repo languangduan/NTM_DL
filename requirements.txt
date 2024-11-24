@@ -1,0 +1,8 @@
+nltk~=3.9.1
+DateTime~=5.5
+matplotlib~=3.9.2
+torch~=2.4.1+cu124
+scikit-learn~=1.4.2
+tqdm~=4.66.2
+gensim~=4.3.3
+numpy~=1.26.3
